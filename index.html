@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1c4233" />
+    <title>遗迹小径</title>
+    <style>
+      /* 页面本身不滚动，让游戏始终居中显示。 */
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body {
+        position: relative;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(circle at top, #3c8060 0%, #193c32 58%, #10251f 100%);
+        font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      }
+      /* 页面全屏时，所有 1280x720 的游戏层按 16:9 等比放大，避免透明画布之外变成黑色。 */
+      :fullscreen,
+      :-webkit-full-screen { background: #10251f; }
+      :fullscreen canvas,
+      :-webkit-full-screen canvas {
+        width: min(100vw, 177.7778vh) !important;
+        height: min(100vh, 56.25vw) !important;
+      }
+      :fullscreen #menu-video-bg,
+      :fullscreen #menu-ui-layer,
+      :-webkit-full-screen #menu-video-bg,
+      :-webkit-full-screen #menu-ui-layer {
+        width: min(100vw, 177.7778vh);
+        height: min(100vh, 56.25vw);
+      }
+      /* 全屏容器会变宽，菜单项目改用屏幕中心定位，避免仍停留在旧的 1280px 坐标左侧。 */
+      :fullscreen .menu-image-button,
+      :-webkit-full-screen .menu-image-button { left: calc(50% - 124px); }
+      :fullscreen #menu-start,
+      :-webkit-full-screen #menu-start { top: calc(50% - 70px); }
+      :fullscreen #menu-continue,
+      :-webkit-full-screen #menu-continue { top: calc(50% + 10px); }
+      :fullscreen #menu-levels,
+      :-webkit-full-screen #menu-levels { top: calc(50% + 90px); }
+      :fullscreen #menu-settings,
+      :-webkit-full-screen #menu-settings { top: calc(50% + 170px); }
+      :fullscreen #fragment-panel,
+      :-webkit-full-screen #fragment-panel {
+        top: calc(50% + 275px);
+        left: calc(50% - 144px);
+      }
+      /* 背景只附着在游戏画布上，不会默认铺满整个浏览器窗口。 */
+      canvas {
+        /* 游戏画布在视频上方，切换到说明、设置或关卡时才能正常看到游戏内容。 */
+        position: relative;
+        z-index: 1;
+        background: transparent;
+        /* 覆盖 Phaser 可能写入的自动边距，交给 body 的网格布局负责居中。 */
+        margin: 0 !important;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, .42);
+      }
+      /* 视频与菜单图片使用网页原生标签显示，兼容直接双击打开游戏的方式。 */
+      #menu-video-bg {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        z-index: 0;
+        width: 1280px;
+        height: 720px;
+        transform: translate(-50%, -50%);
+        object-fit: cover;
+        pointer-events: none;
+      }
+      #menu-ui-layer {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        z-index: 2;
+        display: none;
+        width: 1280px;
+        height: 720px;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      /* 加载层使用普通网页图片，双击打开 index.html 时也不会被浏览器拦截。 */
+      #loading-ui-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: none;
+        place-items: center;
+        background: rgba(0, 0, 0, .92);
+        pointer-events: auto;
+      }
+      #loading-progress-panel { width: 625px; }
+      #loading-progress-art { position: relative; width: 100%; }
+      #loading-progress-frame { display: block; width: 100%; }
+      #loading-progress-mask {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      #loading-progress-fill { display: block; width: 625px; max-width: none; }
+      #loading-progress-text {
+        margin: 18px 0 0;
+        color: #fff2c8;
+        font-size: 20px;
+        font-weight: bold;
+        text-align: center;
+        text-shadow: 0 2px 4px #000000;
+      }
+      /* 探险手册使用独立的网页图片层，确保本地直接打开游戏时也能正确显示新背板和按钮。 */
+      #tutorial-ui-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 3;
+        display: none;
+        background: rgba(0, 0, 0, .48);
+        pointer-events: auto;
+      }
+      #tutorial-book {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 860px;
+        /* 按最新背板的原始 927:603 比例计算高度，避免书页图案被拉伸。 */
+        height: 559.4px;
+        transform: translate(-50%, -50%);
+        background: url('./assets/images/ui/tutorial/tutorial-board.png') center / 100% 100% no-repeat;
+      }
+      :fullscreen #tutorial-book,
+      :-webkit-full-screen #tutorial-book {
+        top: 50%;
+        left: 50%;
+      }
+      #tutorial-steps {
+        position: absolute;
+        top: 132px;
+        right: 66px;
+        left: 66px;
+        margin: 0;
+        padding: 0;
+        color: #5c4127;
+        font-size: 19px;
+        font-weight: bold;
+        line-height: 2.2;
+        letter-spacing: .6px;
+        list-style-position: inside;
+      }
+      #tutorial-actions {
+        position: absolute;
+        right: 150px;
+        bottom: 68px;
+        left: 150px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .tutorial-image-button {
+        width: 250px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        pointer-events: auto;
+        transition: transform 140ms ease, filter 140ms ease;
+      }
+      .tutorial-image-button:hover { transform: scale(1.04); filter: brightness(1.08); }
+      .tutorial-image-button img { display: block; width: 100%; }
+      /* 关卡选择也使用网页原生图片层，确保双击打开 index.html 时不会出现黑绿占位图。 */
+      #level-select-ui-layer {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        z-index: 3;
+        display: none;
+        width: 1280px;
+        height: 720px;
+        transform: translate(-50%, -50%);
+        pointer-events: auto;
+      }
+      #level-select-background {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+      #level-select-subtitle {
+        position: absolute;
+        /* 下移说明文字，避免它与上方的木牌标题发生重叠。 */
+        top: 157px;
+        right: 0;
+        left: 0;
+        margin: 0;
+        color: #70512f;
+        font-size: 19px;
+        font-weight: bold;
+        letter-spacing: .3px;
+        text-align: center;
+        text-shadow: 0 1px 0 #fff3cc;
+        pointer-events: none;
+      }
+      /* 固定为五列两行，让十个关卡卡片与背景画框对齐；超过十关时再增加翻页功能。 */
+      #level-select-grid {
+        position: absolute;
+        top: 197px;
+        left: 175px;
+        display: grid;
+        grid-template-columns: repeat(5, 159px);
+        column-gap: 31px;
+        row-gap: 41px;
+      }
+      .level-card {
+        position: relative;
+        display: block;
+        box-sizing: border-box;
+        width: 159px;
+        height: 153px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+      }
+      button.level-card {
+        cursor: pointer;
+        transition: transform 140ms ease, filter 140ms ease;
+      }
+      button.level-card:hover { transform: scale(1.05); filter: brightness(1.06); }
+      .level-card img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        user-select: none;
+      }
+      .level-card-title,
+      .level-card-name,
+      .level-card-status {
+        position: absolute;
+        right: 6px;
+        left: 6px;
+        text-align: center;
+        pointer-events: none;
+      }
+      .level-card-title {
+        top: 29px;
+        color: #fff7d8;
+        font-size: 25px;
+        font-weight: bold;
+        line-height: 1;
+        text-shadow: 0 2px 0 #355121, 0 0 3px #355121;
+      }
+      .level-card-name {
+        top: 67px;
+        color: #eef6d5;
+        font-size: 16px;
+        font-weight: bold;
+        line-height: 1.2;
+        text-shadow: 0 2px 0 #355121, 0 0 3px #355121;
+      }
+      .level-card-status {
+        top: 106px;
+        color: #ffe76d;
+        font-size: 18px;
+        font-weight: bold;
+        line-height: 1;
+        text-shadow: 0 2px 0 #70451c, 0 0 3px #70451c;
+      }
+      #level-select-back {
+        position: absolute;
+        top: 582px;
+        left: 50%;
+        width: 253px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        transform: translateX(-50%);
+        transition: transform 140ms ease, filter 140ms ease;
+      }
+      #level-select-back:hover { transform: translateX(-50%) scale(1.04); filter: brightness(1.08); }
+      #level-select-back img { display: block; width: 100%; }
+      .menu-image-button {
+        position: absolute;
+        /* 按钮缩小为原来的 80%，并重新计算 left，让它仍以 1280px 画面的中线居中。 */
+        left: 516px;
+        width: 248px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        pointer-events: auto;
+        transition: transform 140ms ease, filter 140ms ease;
+      }
+      .menu-image-button:hover { transform: scale(1.04); filter: brightness(1.08); }
+      .menu-image-button img { display: block; width: 100%; }
+      /* 使用 80px 间距：比原来紧凑一点，也给每个按钮留下舒适的呼吸空间。 */
+      #menu-start { top: 295px; }
+      #menu-continue { top: 375px; }
+      #menu-levels { top: 455px; }
+      #menu-settings { top: 535px; }
+      #fragment-panel {
+        position: absolute;
+        top: 650px;
+        left: 496px;
+        width: 288px;
+        height: 45px;
+        background: url('./assets/images/ui/story/fragment-counter-panel.png') center / 100% 100% no-repeat;
+      }
+      #fragment-count {
+        display: grid;
+        width: 100%;
+        height: 100%;
+        place-items: center;
+        color: #ffffff;
+        font-size: 17px;
+        font-weight: bold;
+        text-shadow: 0 2px 3px rgba(44, 27, 12, .9);
+      }
+    </style>
+    <!-- Phaser 是游戏画面和按键控制所使用的免费游戏框架。 -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
+  </head>
+  <body>
+    <video id="menu-video-bg" autoplay muted loop playsinline>
+      <source src="./assets/videos/menu-background.mp4" type="video/mp4" />
+    </video>
+    <div id="loading-ui-layer" aria-label="游戏加载中">
+      <div id="loading-progress-panel">
+        <div id="loading-progress-art">
+          <img id="loading-progress-frame" src="./assets/images/ui/progress/progress-empty.png" alt="游戏加载进度" />
+          <div id="loading-progress-mask"><img id="loading-progress-fill" src="./assets/images/ui/progress/progress-fill.png" alt="" /></div>
+        </div>
+        <p id="loading-progress-text">正在进入森林遗迹 0%</p>
+      </div>
+    </div>
+    <div id="tutorial-ui-layer" aria-label="探险手册">
+      <section id="tutorial-book">
+        <ol id="tutorial-steps">
+          <li>按住 WASD 或方向键移动小女孩，她会像在场景里探险一样连续移动。</li>
+          <li>每一关都有一个金色碎片，必须收集本关碎片才能打开出口。</li>
+          <li>先在地图里找到武器，没有武器时碰到守卫会失败。</li>
+          <li>守卫会在地图上随机巡逻，拿到武器后碰到守卫即可击败它。</li>
+          <li>沼泽不能踩，踩进沼泽会让本关探险失败。</li>
+          <li>碎片和钥匙都拿到后出口大门会打开，找到打开的出口即可通关。</li>
+        </ol>
+        <div id="tutorial-actions">
+          <button id="tutorial-start" class="tutorial-image-button" aria-label="开始探险"><img src="./assets/images/ui/tutorial/button-explore.png" alt="开始探险" /></button>
+          <button id="tutorial-menu" class="tutorial-image-button" aria-label="返回菜单"><img src="./assets/images/ui/tutorial/button-back-menu.png" alt="返回菜单" /></button>
+        </div>
+      </section>
+    </div>
+    <!-- 关卡选择采用浏览器直接显示图片，避免本地打开游戏时 Phaser 无法加载 PNG 素材。 -->
+    <div id="level-select-ui-layer" aria-label="选择关卡">
+      <img id="level-select-background" src="./assets/images/ui/level-select/level-select-background.png" alt="" />
+      <p id="level-select-subtitle">带有叶子标记的关卡已经通过，可以随时重玩。</p>
+      <div id="level-select-grid" role="list" aria-label="关卡列表"></div>
+      <button id="level-select-back" aria-label="返回主菜单"><img src="./assets/images/ui/level-select/button-back-menu.png" alt="返回主菜单" /></button>
+    </div>
+    <div id="menu-ui-layer" aria-label="游戏主菜单">
+      <button id="menu-start" class="menu-image-button" aria-label="开始游戏"><img src="./assets/images/ui/menu/button-start.png" alt="开始游戏" /></button>
+      <button id="menu-continue" class="menu-image-button" aria-label="继续游戏"><img src="./assets/images/ui/menu/button-continue.png" alt="继续游戏" /></button>
+      <button id="menu-levels" class="menu-image-button" aria-label="关卡选择"><img src="./assets/images/ui/menu/button-level-select.png" alt="关卡选择" /></button>
+      <button id="menu-settings" class="menu-image-button" aria-label="设置"><img src="./assets/images/ui/menu/button-settings.png" alt="设置" /></button>
+      <div id="fragment-panel"><span id="fragment-count"></span></div>
+    </div>
+    <!-- 角色序列帧数据先加载，确保直接双击 index.html 时真实小女孩素材也能稳定显示。 -->
+    <script src="./assets/images/level-01/level1-art-data.js"></script>
+    <script src="./assets/images/characters/player-sprite-data.js"></script>
+    <script src="./assets/images/ui/end-panel/end-panel-art-data.js"></script>
+    <!-- game.bundle.js 由工具自动合并，确保双击本文件时也能直接运行。 -->
+    <script src="./game.bundle.js"></script>
+  </body>
+</html>
